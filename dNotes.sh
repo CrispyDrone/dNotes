@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# enable extended pattern matching
+shopt -s extglob
+
+# If an error occurs, exit script
+set -e
+
 # Commands:
 # dNotes FILENAME
 # empties FILENAME, sends content to appropriate files, uses $TAG_FILES as the configuration file
@@ -47,16 +53,35 @@ EOF
 
 # loads all TAG-FILES couples into memory, from the configuration file
 # $1 = config file location
+
+# might be unnecessary, jq makes it really easy to look up a specific tag straight from the json, it's a json parser after all. So I might just load the entire config file AS json into memory
+# loadTags() {
+# 	# use jq
+# 	tagFiles=$(cat "$1" | jq-win64.exe '.[] | .Tag + "|" + .Path')
+# }
+
+# loads config file
+# $1 = config filepath
 loadTags() {
-	configContent=$(cat "$1")
-	# use jq
-	
+	configFile=$(cat "$1")
 }
 
 # reads the bucket file one line at a time
-# $1 = bucket file
+# $1 = bucket filepath
 parseBucket() {
+	# bucketFile=$(cat "$1")
 	# regex to find opening tag
+	isOpeningTagRegex="^<@.*>"
+	# regex to find end tag
+	isEndTagRegex="^</@.*>"
+	# actually you should base the second regex on the tag identified in with the first one...
+
+	# iterate over each line
+	while IFS='' read -r line || [[ -n "$line" ]]
+	do
+		# echo "$line"
+
+	done < <(cat "$1")
 
 	# check whether it exists in tagFiles
 
@@ -78,6 +103,22 @@ exportNewTags() {
 	# for all tags in readTagFiles that are not in tagFiles, write them to the configuration file
 }
 
+createEnvironmentVariable() {
+	case "$1" in
+		setx)
+			setx "$2" "$3"
+			;;
+		export)
+			echo "$2"="$3" >> ~/.bashrc
+			;;
+		*)
+			;;
+		esac
+}
+
+jq() {
+}
+
 # variables
 # 1: TAG-FILES
 tagFiles=
@@ -88,19 +129,116 @@ readTagContent=
 # 4: empty bucket file
 emptyFile=true
 # 5: configFile filepath
+configFilePath=
+# 6: configFile
 configFile=
-# 6: bucket file
+# 7: bucket file
 bucketFile=
+# 8: bucket filepath
+bucketFilePath=
+# 9: command to create environment variable
+createEnvironmentVariableCommandName=""
+# 10: jq command
+jqname=
+
+case "$OSTYPE" in
+	darwin*)
+		# DEBUG: echo "I am a mac"
+		jqname="jq"
+		createEnvironmentVariableCommandName="export"
+		;;
+	linux-gnu)
+		# DEBUG: echo "I am a linux or windows 10"
+		if [[ "$(grep -qi Microsoft /proc/sys/kernel/osrelease 2> /dev/null)" =~ *Microsoft* ]]
+		then
+			if [ "$(uname -a)" == 'x86_64' ]
+			then
+				jqname="jq-win64"
+			else
+				jqname="jq-win32"
+			fi
+			createEnvironmentVariableCommandName="setx"
+		else
+			jqname="gs"
+			createEnvironmentVariableCommandName="export"
+		fi
+		;;
+	cygwin)
+		# DEBUG: echo "I am windows using cygwin"
+		if [[ "$(uname -a)" =~ x86_64 ]]
+		then
+			jqname="jq-win64"
+		else
+			jqname="jq-win32"
+		fi
+		createEnvironmentVariableCommandName="setx"
+		;;
+	msys)
+		# DEBUG: echo "I am windows using minimal shell"
+		if [[ "$(uname -a)" =~ x86_64 ]]
+		then
+			jqname="jq-win64"
+		else
+			jqname="jq-win32"
+		fi
+		createEnvironmentVariableCommandName="setx"
+		;;
+	*)
+		# DEBUG: echo "I am something else..."
+		jqname="jq"
+		createEnvironmentVariableCommandName="export"
+		;;
+esac
 
 # parse command line arguments
 
+while [ ! $# -eq 0 ]
+do
+	case "$1" in
+		# man page
+		man)
+			man
+			exit 0;;
+		# p flag
+		-p)
+			emptyFile=false
+			shift
+			;;
 
-# $1 = bucketFile, $2 = configFile
+		# config file
+		-c)
+			if [ -f "$2" ]
+			then
+				configFilePath="$2"
+				createEnvironmentVariable "$createEnvironmentVariableCommandName" "TAG_FILES" "$2"
+				export TAG_FILES="$2"
+				shift 2
+			else
+				echo "$2 is not a file!"
+				exit 1
+			fi
+			;;
+
+		# filename
+		*)
+			if [ -f "$1" ]
+			then
+				bucketFilePath="$1"
+				shift
+			else
+				echo "$1 is not a file!"
+				exit 1
+			fi
+			;;
+	esac
+done
+
+# $1 = bucketFilePath, $2 = configFilePath
 main() {
-	loadTags $2
-	parseBucket $1
+	loadTags "$2"
+	parseBucket "$1"
 	exportChanges
 	exportNewTags
 }
 
-main $bucketFile $configFile
+main "$bucketFilePath" "$configFilePath"
