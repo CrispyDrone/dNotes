@@ -63,7 +63,7 @@ EOF
 # loads config file
 # $1 = config filepath
 loadTags() {
-	configFile=$(cat "$1")
+	configFile=$(< "$1")
 }
 
 # reads the bucket file one line at a time
@@ -74,14 +74,37 @@ parseBucket() {
 	isOpeningTagRegex="^<@.*>"
 	# regex to find end tag
 	isEndTagRegex="^</@.*>"
-	# actually you should base the second regex on the tag identified in with the first one...
+	# actually you should base the second regex on the tag identified in with the first one... but for now let's attempt the general case
 
+	readingTag=false
+	tagExists=false
 	# iterate over each line
 	while IFS='' read -r line || [[ -n "$line" ]]
 	do
-		# echo "$line"
+		if [ $readingTag = false ]
+		then
+			# echo "$line"
+			if [[ $line =~ $isOpeningTagRegex ]]
+			then
+				readingTag=true
+				tag = $(jq $jqname "'.[] | select(.Tag == "$(echo "$line" | sed 's/<@\(.*\)>/\1/')")'")
+				if [ ! -z "$tag" ]
+				then
+					# tag exists in config file
+					tagExists=true
+				fi
+		fi		
+		else
+			if [ $tagExists = false ]
+			then
+				# line after opening tag, should be file path
+			else
+				# continue reading and adding to tagContent
+			fi
+		fi
+		
 
-	done < <(cat "$1")
+	done < <(< "$1")
 
 	# check whether it exists in tagFiles
 
@@ -116,12 +139,11 @@ createEnvironmentVariable() {
 		esac
 }
 
+# $1 = jqname, $2 = jq commands 
 jq() {
 }
 
 # variables
-# 1: TAG-FILES
-tagFiles=
 # 2: read TAG-FILES
 readTagFiles=
 # 3: read TAG-CONTENT
