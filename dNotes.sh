@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# debugging
+set -x
+trap read debug
+
 # enable extended pattern matching
 shopt -s extglob
 
@@ -78,6 +82,7 @@ parseBucket() {
 
 	readingTag=false
 	tagExists=false
+	tag=
 	# iterate over each line
 	while IFS='' read -r line || [[ -n "$line" ]]
 	do
@@ -87,24 +92,54 @@ parseBucket() {
 			if [[ $line =~ $isOpeningTagRegex ]]
 			then
 				readingTag=true
-				tag = $(jq $jqname "'.[] | select(.Tag == "$(echo "$line" | sed 's/<@\(.*\)>/\1/')")'")
+				tag=$(jq "$jqname" "$configFile" ".[] | select(.Tag == \"$(echo "$line" | sed 's/<@\(.*\)>/\1/')\") | .Tag")
 				if [ ! -z "$tag" ]
 				then
 					# tag exists in config file
 					tagExists=true
 				fi
-		fi		
+				# tagExists=false, so next line should be file path for new tag
+			fi
 		else
 			if [ $tagExists = false ]
 			then
 				# line after opening tag, should be file path
+				# how to check whether something is a valid filepath?? File does not need to exist yet!
+				if [ -f "$line" ]
+				then
+					# is a file path, remember new tag-filepath combination
+					# change tagExists to true
+					configFile=$(jq "$jqname" "$configFile" ". + [{Tag: "$tag", Path: "$line"}]")
+					tagExists=true
+				else
+					# create file, if it fails, file path is not valid, exit with error
+					if ! echo > "$line"
+					then
+						echo "$line is not a valid file path!"
+						exit 1
+					fi
+				fi
 			else
-				# continue reading and adding to tagContent
+				# continue reading and adding to tagContent until you hit the end tag
+				if [[ $line =~ $isEndTagRegex ]]
+				then
+					readingTag=false
+					tagExists=false
+				else
+					# add to tag's content, if key is already present, else add key and content
+					if [[ -z $(jq "$jqname" "$readTagContent" ".[] | select(.Tag == \"$tag\")") ]]
+					then
+						readTagContent=$(jq "$jqname" "$readTagContent" ". + [{Tag: "$tag", Content: "$line"}]")
+					else
+						readTagContent=$(jq "$jqname" "$readTagContent" ".[] | select(.Tag =="$tag") |= { Tag: .Tag, Content: (.Content + "$line")}")
+					fi
+				fi
 			fi
 		fi
-		
+	#done < <(< "$1")
+	done < "$1"
 
-	done < <(< "$1")
+	echo "Finished parsing bucket file!"
 
 	# check whether it exists in tagFiles
 
@@ -116,14 +151,26 @@ parseBucket() {
 
 # writes out all changes to the appropriate target files
 exportChanges() {
-	# for all tags in readTagFiles, add content in the corresponding tag of readTagContent to the file associated with the tag in readTagFiles
-	# if file does not exist yet, create it (always .md file)
+	# for all tags in readTagContent write out content to the file associated with the tag
 	# log this action
+
+	for tuple in $(jq "$jqname" "$readTagContent" "-c '.[]'")
+	do
+		# how to assign to multiple variables? Or even avoid the variables 
+		tupleTag=$(jq "$jqname" "$tuple" ".Tag")
+		tupleContent=$(jq "$jqname" "$tuple" ".Content")
+		echo "writing to tag: $tupleTag following content: $tupleContent"
+		tupleTagFilePath=$(jq "$jqname" "$configFile" ".[] | select(.Tag == "$tupleTag") | .Path")
+		echo "$tupleContent" >> "$tupleTagFilePath"
+	done
 }
 
 # exports the new tags to the configuration file
 exportNewTags() {
 	# for all tags in readTagFiles that are not in tagFiles, write them to the configuration file
+
+	# actually for now just entirely overwrite the config file...
+	echo "$configFile" > "$configFilePath"
 }
 
 createEnvironmentVariable() {
@@ -139,15 +186,26 @@ createEnvironmentVariable() {
 		esac
 }
 
-# $1 = jqname, $2 = jq commands 
+# $1 = jqname, $2 = input, $3 = jq commands 
 jq() {
+	case "$1" in
+		jq-win64)
+			echo "$2" | jq-win64.exe "$3"
+			;;
+		jq-win32)
+			echo "$2" | jq-win32.exe "$3"
+			;;
+		*)
+			echo "$2" | jq "$3"
+			;;
+	esac
 }
 
 # variables
-# 2: read TAG-FILES
-readTagFiles=
+# 2: TAG-FILES
+# readTagFiles=[]
 # 3: read TAG-CONTENT
-readTagContent=
+readTagContent=[]
 # 4: empty bucket file
 emptyFile=true
 # 5: configFile filepath
@@ -181,7 +239,7 @@ case "$OSTYPE" in
 			fi
 			createEnvironmentVariableCommandName="setx"
 		else
-			jqname="gs"
+			jqname="jq"
 			createEnvironmentVariableCommandName="export"
 		fi
 		;;
@@ -261,6 +319,10 @@ main() {
 	parseBucket "$1"
 	exportChanges
 	exportNewTags
+	if [[ $emptyFile == true ]]
+	then
+		> "$1"
+	fi
 }
 
 main "$bucketFilePath" "$configFilePath"

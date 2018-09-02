@@ -2,3 +2,5 @@
 *.un~
 *.swp
 regextest.txt
+*.TODO
+bucketFile.md
