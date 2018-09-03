@@ -93,25 +93,23 @@ parseBucket() {
 			then
 				readingTag=true
 				tag=$(jq "$jqname" "$configFile" ".[] | select(.Tag == \"$(echo "$line" | sed 's/<@\(.*\)>/\1/')\") | .Tag")
-				if [ ! -z "$tag" ]
+				tag=$(echo "$tag" | sed 's/"\(.*\)"/\1/')
+				if [ -z "$tag" ]
 				then
+					# tagExists=false, so next line should be file path for new tag
+					tag=$(echo "$line" | sed 's/<@\(.*\)>/\1/')
+				else
 					# tag exists in config file
 					tagExists=true
 				fi
-				# tagExists=false, so next line should be file path for new tag
 			fi
 		else
 			if [ $tagExists = false ]
 			then
 				# line after opening tag, should be file path
 				# how to check whether something is a valid filepath?? File does not need to exist yet!
-				if [ -f "$line" ]
+				if [ ! -f "$line" ]
 				then
-					# is a file path, remember new tag-filepath combination
-					# change tagExists to true
-					configFile=$(jq "$jqname" "$configFile" ". + [{Tag: "$tag", Path: "$line"}]")
-					tagExists=true
-				else
 					# create file, if it fails, file path is not valid, exit with error
 					if ! echo > "$line"
 					then
@@ -119,6 +117,11 @@ parseBucket() {
 						exit 1
 					fi
 				fi
+				# now is a file path, remember new tag-filepath combination
+				# change tagExists to true
+				configFile=$(jq "$jqname" "$configFile" ". + [{Tag: \"$tag\", Path: \"$line\"}]")
+				tagExists=true
+
 			else
 				# continue reading and adding to tagContent until you hit the end tag
 				if [[ $line =~ $isEndTagRegex ]]
@@ -129,9 +132,9 @@ parseBucket() {
 					# add to tag's content, if key is already present, else add key and content
 					if [[ -z $(jq "$jqname" "$readTagContent" ".[] | select(.Tag == \"$tag\")") ]]
 					then
-						readTagContent=$(jq "$jqname" "$readTagContent" ". + [{Tag: "$tag", Content: "$line"}]")
+						readTagContent=$(jq "$jqname" "$readTagContent" ". + [{Tag: \"$tag\", Content: \"$line\"}]")
 					else
-						readTagContent=$(jq "$jqname" "$readTagContent" ".[] | select(.Tag =="$tag") |= { Tag: .Tag, Content: (.Content + "$line")}")
+						readTagContent=$(jq "$jqname" "$readTagContent" "[.[] | select(.Tag ==\"$tag\") |= { Tag: .Tag, Content: (.Content + \"$line\")}]")
 					fi
 				fi
 			fi
@@ -154,15 +157,32 @@ exportChanges() {
 	# for all tags in readTagContent write out content to the file associated with the tag
 	# log this action
 
-	for tuple in $(jq "$jqname" "$readTagContent" "-c '.[]'")
+	# compactReadTagContent=$(jq "$jqname" "$readTagContent" ".[]")
+        # compactReadTagContent= echo "$compactReadTagContent" | tr -d '\n\r' | sed 's/}/}\n/g' | sed 's/{[[:space:]]*/{/' | sed 's/:[[:space:]]*/:/g' | sed 's/,[[:space:]]*/,/'
+
+	# for tuple in $(jq "$jqname" "$readTagContent" ".[]")
+	# do
+	# 	# how to assign to multiple variables? Or even avoid the variables 
+	# 	tupleTag=$(jq "$jqname" "$tuple" ".Tag")
+	# 	tupleContent=$(jq "$jqname" "$tuple" ".Content")
+	# 	echo "writing to tag: $tupleTag following content: $tupleContent"
+	# 	tupleTagFilePath=$(jq "$jqname" "$configFile" ".[] | select(.Tag == "$tupleTag") | .Path")
+	# 	# echo "$tupleContent" >> "$tupleTagFilePath"
+	# done
+
+
+	for aTag in $(jq "$jqname" "$readTagContent" ".[] | .Tag")
 	do
-		# how to assign to multiple variables? Or even avoid the variables 
-		tupleTag=$(jq "$jqname" "$tuple" ".Tag")
-		tupleContent=$(jq "$jqname" "$tuple" ".Content")
-		echo "writing to tag: $tupleTag following content: $tupleContent"
-		tupleTagFilePath=$(jq "$jqname" "$configFile" ".[] | select(.Tag == "$tupleTag") | .Path")
-		echo "$tupleContent" >> "$tupleTagFilePath"
+		aTag=$(echo "$aTag" | sed 's/"\(.*\)"/\1/')
+		tupleContent=$(jq "$jqname" "$readTagContent" ".[] | select(.Tag == \"$aTag\") | .Content")
+		tupleFilePath=$(jq "$jqname" "$configFile" ".[] | select(.Tag == \"$aTag\") | .Path")
+		tupleFilePath=$(echo "$tupleFilePath" | sed 's/"\(.*\)"/\1/')
+		# tupleFilePath=$(echo "$tupleFilePath" | sed 's/\\\\/\\/g')
+		echo "writing to tag: $aTag at filepath $tupleFilePath following content: $tupleContent"
+		echo "$tupleContent" >> "$tupleFilePath"
 	done
+	
+	echo "Finished dispersing content!"
 }
 
 # exports the new tags to the configuration file
@@ -171,6 +191,7 @@ exportNewTags() {
 
 	# actually for now just entirely overwrite the config file...
 	echo "$configFile" > "$configFilePath"
+	echo "Finished exporting tags!"
 }
 
 createEnvironmentVariable() {
@@ -186,7 +207,7 @@ createEnvironmentVariable() {
 		esac
 }
 
-# $1 = jqname, $2 = input, $3 = jq commands 
+# $1 = jqname, $2 = input, $3 = jq commands
 jq() {
 	case "$1" in
 		jq-win64)
