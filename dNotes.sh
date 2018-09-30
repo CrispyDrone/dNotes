@@ -3,6 +3,7 @@
 # debugging
 set -x
 trap read debug
+# set -o functrace
 
 # enable extended pattern matching
 shopt -s extglob
@@ -44,6 +45,8 @@ set -e
 
 man() {
 	cat << EOF
+
+
 Introduction:
 
 
@@ -69,7 +72,6 @@ EOF
 loadTags() {
 	configFile=$(< "$1")
 }
-
 # reads the bucket file one line at a time
 # $1 = bucket filepath
 parseBucket() {
@@ -106,12 +108,15 @@ parseBucket() {
 		else
 			if [ $tagExists = false ]
 			then
+				# remove \r or \r\n
+				line=${line//[$'\r\n']}
 				# line after opening tag, should be file path
 				# how to check whether something is a valid filepath?? File does not need to exist yet!
 				if [ ! -f "$line" ]
 				then
 					# create file, if it fails, file path is not valid, exit with error
-					if ! echo > "$line"
+					# if ! echo > "$line"
+					if ! ( mkdir -p "$(dirname "$line")" && echo > "$line" )
 					then
 						echo "$line is not a valid file path!"
 						exit 1
@@ -175,11 +180,22 @@ exportChanges() {
 	do
 		aTag=$(echo "$aTag" | sed 's/"\(.*\)"/\1/')
 		tupleContent=$(jq "$jqname" "$readTagContent" ".[] | select(.Tag == \"$aTag\") | .Content")
+		tupleContent=$(echo "$tupleContent" | sed 's/"\(.*\)"/\1/')
 		tupleFilePath=$(jq "$jqname" "$configFile" ".[] | select(.Tag == \"$aTag\") | .Path")
 		tupleFilePath=$(echo "$tupleFilePath" | sed 's/"\(.*\)"/\1/')
 		# tupleFilePath=$(echo "$tupleFilePath" | sed 's/\\\\/\\/g')
 		echo "writing to tag: $aTag at filepath $tupleFilePath following content: $tupleContent"
-		echo "$tupleContent" >> "$tupleFilePath"
+		# make sure file path exists
+		if [ ! -f "$tupleFilePath" ]
+		then
+			if ! ( mkdir -p "$(dirname "$tupleFilePath")" && echo > "$tupleFilePath" )
+			then
+				echo "$tupleFilePath is not a valid file path!"
+				exit 1
+			fi
+		fi
+
+		echo -ne "$tupleContent" >> "$tupleFilePath"
 	done
 	
 	echo "Finished dispersing content!"
@@ -190,7 +206,9 @@ exportNewTags() {
 	# for all tags in readTagFiles that are not in tagFiles, write them to the configuration file
 
 	# actually for now just entirely overwrite the config file...
-	echo "$configFile" > "$configFilePath"
+	# remove any \r and \n
+	# echo "${configFile//[$'\r\n']}" > "$configFilePath"
+	jq "$jqname" "$configFile" "." > "$configFilePath"
 	echo "Finished exporting tags!"
 }
 
@@ -234,7 +252,7 @@ configFilePath=
 # 6: configFile
 configFile=
 # 7: bucket file
-bucketFile=
+# bucketFile=
 # 8: bucket filepath
 bucketFilePath=
 # 9: command to create environment variable
@@ -250,7 +268,8 @@ case "$OSTYPE" in
 		;;
 	linux-gnu)
 		# DEBUG: echo "I am a linux or windows 10"
-		if [[ "$(grep -qi Microsoft /proc/sys/kernel/osrelease 2> /dev/null)" =~ *Microsoft* ]]
+		# if [[ "$(grep -qi Microsoft /proc/sys/kernel/osrelease 2> /dev/null)" =~ *Microsoft* ]]
+		if [[ "$(grep -qi Microsoft /proc/sys/kernel/osrelease 2> /dev/null)" =~ .*Microsoft.* ]]
 		then
 			if [ "$(uname -a)" == 'x86_64' ]
 			then
@@ -342,7 +361,7 @@ main() {
 	exportNewTags
 	if [[ $emptyFile == true ]]
 	then
-		> "$1"
+		echo > "$1"
 	fi
 }
 
