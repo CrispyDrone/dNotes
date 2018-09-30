@@ -15,7 +15,7 @@ chmod +x Your/Path/To/dNotes.sh
 
 #### Setup
 Before running the script, you need to have a *bucketfile* that contains any text at all that you want to add to the end of different files. Next you surround the text that should go 
-to a particular file with the `<@TAG> INSERT TEXT <@/TAG>` elements. Meanwhile inside the config.json file you have a json array that consists of objects with a `Tag` and `Path` property (take care of escaping
+to a particular file with the `<@TAG> INSERT TEXT <@/TAG>` elements (these elements should be on separate lines). Meanwhile inside the config.json file you have a json array that consists of objects with a `Tag` and `Path` property (take care of escaping
 characters such as backslashes, since it has to be valid JSON!):
 ```json
 [
@@ -59,6 +59,8 @@ Empties the bucketFile.md into the files described by the tags inside the config
 + Ending tag does not need to match, which could give issues if you're using `</@>` in your content somehow.
 
 ## Towards the future
++ Allow a default file to be set for the config.json file through an environment variable
++ Implement the man function
 + Option to clean config.json files by removing unused tags
 + Nested tags that allow content to be directed to particular locations inside a file instead of only appending to the end (this will require line numbers, or a sort of (unique) pattern to be specified to direct the insertion of text)
 + Complete rewrite of the script to be more efficient
